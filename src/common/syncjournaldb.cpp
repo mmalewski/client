@@ -46,7 +46,7 @@ Q_LOGGING_CATEGORY(lcDb, "sync.database", QtInfoMsg)
 
 #define GET_FILE_RECORD_QUERY \
         "SELECT path, inode, modtime, type, md5, fileid, remotePerm, filesize," \
-        "  ignoredChildrenRemote, contentchecksumtype.name || ':' || contentChecksum" \
+        "  ignoredChildrenRemote, contentchecksumtype.name || ':' || contentChecksum, vfsPinState" \
         " FROM metadata" \
         "  LEFT JOIN checksumtype as contentchecksumtype ON metadata.contentChecksumTypeId == contentchecksumtype.id"
 
@@ -62,6 +62,7 @@ static void fillFileRecordFromGetQuery(SyncJournalFileRecord &rec, SqlQuery &que
     rec._fileSize = query.int64Value(7);
     rec._serverHasIgnoredFiles = (query.intValue(8) > 0);
     rec._checksumHeader = query.baValue(9);
+    rec._pinState = static_cast<PinState>(query.intValue(10));
 }
 
 static QByteArray defaultJournalMode(const QString &dbPath)
@@ -376,6 +377,7 @@ bool SyncJournalDb::checkConnect()
                         // ignoredChildrenRemote
                         // contentChecksum
                         // contentChecksumTypeId
+                        // vfsPinState
                         "PRIMARY KEY(phash)"
                         ");");
 
@@ -720,6 +722,15 @@ bool SyncJournalDb::updateMetadataTableStructure()
         }
         commitInternal("update database structure: add contentChecksumTypeId col");
     }
+    if (columns.indexOf("vfsPinState") == -1) {
+        SqlQuery query(_db);
+        query.prepare("ALTER TABLE metadata ADD COLUMN vfsPinState INTEGER;");
+        if (!query.exec()) {
+            sqlFail("updateMetadataTableStructure: add vfsPinState column", query);
+            re = false;
+        }
+        commitInternal("update database structure: add vfsPinState col");
+    }
 
     if (!tableColumns("uploadinfo").contains("contentChecksum")) {
         SqlQuery query(_db);
@@ -856,10 +867,12 @@ bool SyncJournalDb::setFileRecord(const SyncJournalFileRecord &_record)
         }
     }
 
+    int numericPinState = static_cast<int>(record._pinState);
     qCInfo(lcDb) << "Updating file record for path:" << record._path << "inode:" << record._inode
                  << "modtime:" << record._modtime << "type:" << record._type
                  << "etag:" << record._etag << "fileId:" << record._fileId << "remotePerm:" << record._remotePerm.toString()
-                 << "fileSize:" << record._fileSize << "checksum:" << record._checksumHeader;
+                 << "fileSize:" << record._fileSize << "checksum:" << record._checksumHeader
+                 << "pinstate:" << numericPinState;
 
     qlonglong phash = getPHash(record._path);
     if (checkConnect()) {
@@ -878,8 +891,8 @@ bool SyncJournalDb::setFileRecord(const SyncJournalFileRecord &_record)
 
         if (!_setFileRecordQuery.initOrReset(QByteArrayLiteral(
             "INSERT OR REPLACE INTO metadata "
-            "(phash, pathlen, path, inode, uid, gid, mode, modtime, type, md5, fileid, remotePerm, filesize, ignoredChildrenRemote, contentChecksum, contentChecksumTypeId) "
-            "VALUES (?1 , ?2, ?3 , ?4 , ?5 , ?6 , ?7,  ?8 , ?9 , ?10, ?11, ?12, ?13, ?14, ?15, ?16);"), _db)) {
+            "(phash, pathlen, path, inode, uid, gid, mode, modtime, type, md5, fileid, remotePerm, filesize, ignoredChildrenRemote, contentChecksum, contentChecksumTypeId, vfsPinState) "
+            "VALUES (?1 , ?2, ?3 , ?4 , ?5 , ?6 , ?7,  ?8 , ?9 , ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17);"), _db)) {
             return false;
         }
 
@@ -899,6 +912,7 @@ bool SyncJournalDb::setFileRecord(const SyncJournalFileRecord &_record)
         _setFileRecordQuery.bindValue(14, record._serverHasIgnoredFiles ? 1 : 0);
         _setFileRecordQuery.bindValue(15, checksum);
         _setFileRecordQuery.bindValue(16, contentChecksumTypeId);
+        _setFileRecordQuery.bindValue(17, numericPinState);
 
         if (!_setFileRecordQuery.exec()) {
             return false;
@@ -2004,6 +2018,28 @@ void SyncJournalDb::markVirtualFileForDownloadRecursively(const QByteArray &path
     query.prepare("UPDATE metadata SET md5='_invalid_' WHERE (" IS_PREFIX_PATH_OF("?1", "path") " OR " IS_PREFIX_PATH_OR_EQUAL("path", "?1") ") AND type == 2;");
     query.bindValue(1, path);
     query.exec();
+}
+
+PinState SyncJournalDb::pinStateForPath(const QByteArray &path)
+{
+    QMutexLocker lock(&_mutex);
+    if (!checkConnect())
+        return PinState::Unspecified;
+
+    auto &query = _getPinStateQuery;
+    ASSERT(query.initOrReset(QByteArrayLiteral(
+            "SELECT vfsPinState FROM metadata WHERE"
+            " " IS_PREFIX_PATH_OR_EQUAL("path", "?1")
+            " AND vfsPinState is not null AND vfsPinState != 0"
+            " ORDER BY length(path) DESC;"),
+        _db));
+    query.bindValue(1, path);
+    query.exec();
+
+    if (!query.next())
+        return PinState::Unspecified;
+
+    return static_cast<PinState>(query.intValue(0));
 }
 
 void SyncJournalDb::commit(const QString &context, bool startTrans)

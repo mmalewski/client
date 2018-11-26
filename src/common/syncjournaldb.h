@@ -251,6 +251,14 @@ public:
      */
     void markVirtualFileForDownloadRecursively(const QByteArray &path);
 
+    /**
+     * Gets the PinState for the path.
+     *
+     * If the exact path has no entry or has an unspecified state,
+     * the state is inherited through the parent.
+     */
+    PinState pinStateForPath(const QByteArray &path);
+
 private:
     int getFileRecordCount();
     bool updateDatabaseStructure();
@@ -305,6 +313,7 @@ private:
     SqlQuery _getConflictRecordQuery;
     SqlQuery _setConflictRecordQuery;
     SqlQuery _deleteConflictRecordQuery;
+    SqlQuery _getPinStateQuery;
 
     /* Storing etags to these folders, or their parent folders, is filtered out.
      *
