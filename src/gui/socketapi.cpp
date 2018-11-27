@@ -618,14 +618,8 @@ void SocketApi::command_DOWNLOAD_VIRTUAL_FILE(const QString &filesArg, SocketLis
         auto folder = FolderMan::instance()->folderForPath(file, &relativePath);
         if (folder) {
             // For directories, update their pin state so new files are available locally too
-            if (fi.isDir()) {
-                SyncJournalFileRecord rec;
-                folder->journalDb()->getFileRecord(relativePath, &rec);
-                if (rec.isValid()) {
-                    rec._pinState = PinState::AlwaysLocal;
-                    folder->journalDb()->setFileRecord(rec);
-                }
-            }
+            if (fi.isDir())
+                folder->journalDb()->setPinStateForPath(relativePath.toUtf8(), PinState::AlwaysLocal);
 
             folder->downloadVirtualFile(relativePath);
         }
@@ -648,12 +642,7 @@ void SocketApi::command_REPLACE_VIRTUAL_FILE(const QString &filesArg, SocketList
         QFileInfo fi(file);
         if (fi.isDir()) {
             // Update the pin state so new files are available online-only
-            SyncJournalFileRecord rec;
-            folder->journalDb()->getFileRecord(relativePath, &rec);
-            if (rec.isValid()) {
-                rec._pinState = PinState::OnlineOnly;
-                folder->journalDb()->setFileRecord(rec);
-            }
+            folder->journalDb()->setPinStateForPath(relativePath.toUtf8(), PinState::OnlineOnly);
 
             // Trigger dehydration for contained files
             folder->journalDb()->getFilesBelowPath(relativePath.toUtf8(), [&](const SyncJournalFileRecord &rec) {
