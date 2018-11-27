@@ -611,11 +611,22 @@ void SocketApi::command_DOWNLOAD_VIRTUAL_FILE(const QString &filesArg, SocketLis
     auto suffix = QStringLiteral(APPLICATION_DOTVIRTUALFILE_SUFFIX);
 
     for (const auto &file : files) {
-        if (!file.endsWith(suffix) && !QFileInfo(file).isDir())
+        QFileInfo fi(file);
+        if (!file.endsWith(suffix) && !fi.isDir())
             continue;
         QString relativePath;
         auto folder = FolderMan::instance()->folderForPath(file, &relativePath);
         if (folder) {
+            // For directories, update their pin state so new files are available locally too
+            if (fi.isDir()) {
+                SyncJournalFileRecord rec;
+                folder->journalDb()->getFileRecord(relativePath, &rec);
+                if (rec.isValid()) {
+                    rec._pinState = PinState::AlwaysLocal;
+                    folder->journalDb()->setFileRecord(rec);
+                }
+            }
+
             folder->downloadVirtualFile(relativePath);
         }
     }
@@ -636,6 +647,15 @@ void SocketApi::command_REPLACE_VIRTUAL_FILE(const QString &filesArg, SocketList
             continue;
         QFileInfo fi(file);
         if (fi.isDir()) {
+            // Update the pin state so new files are available online-only
+            SyncJournalFileRecord rec;
+            folder->journalDb()->getFileRecord(relativePath, &rec);
+            if (rec.isValid()) {
+                rec._pinState = PinState::OnlineOnly;
+                folder->journalDb()->setFileRecord(rec);
+            }
+
+            // Trigger dehydration for contained files
             folder->journalDb()->getFilesBelowPath(relativePath.toUtf8(), [&](const SyncJournalFileRecord &rec) {
                 if (rec._type != ItemTypeFile || rec._path.endsWith(APPLICATION_DOTVIRTUALFILE_SUFFIX))
                     return;
@@ -811,10 +831,10 @@ void SocketApi::command_GET_MENU_ITEMS(const QString &argument, OCC::SocketListe
             }
         }
         if (hasVirtualFile || (hasDir && folder->useVirtualFiles()))
-            listener->sendMessage(QLatin1String("MENU_ITEM:DOWNLOAD_VIRTUAL_FILE::") + tr("Download file(s)", "", files.size()));
+            listener->sendMessage(QLatin1String("MENU_ITEM:DOWNLOAD_VIRTUAL_FILE::") + tr("Keep updated locally, download if necessary", "", files.size()));
 
         if ((hasNormalFiles || hasDir) && folder->useVirtualFiles())
-            listener->sendMessage(QLatin1String("MENU_ITEM:REPLACE_VIRTUAL_FILE::") + tr("Replace file(s) by virtual file", "", files.size()));
+            listener->sendMessage(QLatin1String("MENU_ITEM:REPLACE_VIRTUAL_FILE::") + tr("Make available on demand, clear local data", "", files.size()));
     }
 
     listener->sendMessage(QString("GET_MENU_ITEMS:END"));
