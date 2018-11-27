@@ -376,7 +376,6 @@ bool SyncJournalDb::checkConnect()
                         // ignoredChildrenRemote
                         // contentChecksum
                         // contentChecksumTypeId
-                        // vfsPinState
                         "PRIMARY KEY(phash)"
                         ");");
 
@@ -730,16 +729,6 @@ bool SyncJournalDb::updateMetadataTableStructure()
         }
         commitInternal("update database structure: add contentChecksumTypeId col");
     }
-    if (columns.indexOf("vfsPinState") == -1) {
-        SqlQuery query(_db);
-        query.prepare("ALTER TABLE metadata ADD COLUMN vfsPinState INTEGER;");
-        if (!query.exec()) {
-            sqlFail("updateMetadataTableStructure: add vfsPinState column", query);
-            re = false;
-        }
-        commitInternal("update database structure: add vfsPinState col");
-    }
-
     if (!tableColumns("uploadinfo").contains("contentChecksum")) {
         SqlQuery query(_db);
         query.prepare("ALTER TABLE uploadinfo ADD COLUMN contentChecksum TEXT;");
