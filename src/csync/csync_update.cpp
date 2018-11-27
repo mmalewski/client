@@ -481,12 +481,19 @@ static int _csync_detect_update(CSYNC *ctx, std::unique_ptr<csync_file_stat_t> f
               }
           }
 
-          // Turn new remote files into virtual files if the option is enabled.
-          if (ctx->new_files_are_virtual
-              && fs->instruction == CSYNC_INSTRUCTION_NEW
-              && fs->type == ItemTypeFile) {
-              fs->type = ItemTypeVirtualFile;
-              fs->path.append(ctx->virtual_file_suffix);
+          // Turn new remote files into virtual files if the directory desires it.
+          if (fs->instruction == CSYNC_INSTRUCTION_NEW && fs->type == ItemTypeFile) {
+              using OCC::PinState;
+
+              // Get the path's pinstate and anchor to the root option
+              auto pinState = ctx->statedb->pinStateForPath(fs->path);
+              if (pinState == PinState::Unspecified)
+                  pinState = ctx->new_files_are_virtual ? PinState::OnlineOnly : PinState::AlwaysLocal;
+
+              if (pinState == PinState::OnlineOnly) {
+                fs->type = ItemTypeVirtualFile;
+                fs->path.append(ctx->virtual_file_suffix);
+              }
           }
 
           goto out;
