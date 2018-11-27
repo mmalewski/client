@@ -673,11 +673,7 @@ private slots:
         QCOMPARE(fakeFolder.currentLocalState(), fakeFolder.currentRemoteState());
 
         auto setPin = [&] (const QByteArray &path, PinState state) {
-            SyncJournalFileRecord rec;
-            fakeFolder.syncJournal().getFileRecord(path, &rec);
-            QVERIFY(rec.isValid());
-            rec._pinState = state;
-            fakeFolder.syncJournal().setFileRecord(rec);
+            fakeFolder.syncJournal().setPinStateForPath(path, state);
         };
 
         fakeFolder.remoteModifier().mkdir("local");
