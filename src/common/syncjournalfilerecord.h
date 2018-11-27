@@ -31,24 +31,6 @@ namespace OCC {
 
 class SyncFileItem;
 
-/** Determines whether files should be available locally or not
- *
- * For new remote files the file's PinState is calculated by looking for
- * the closest parent folder that isn't Unspecified.
- *
- * TODO: It seems to make sense to also store per-file PinStates.
- * Maybe these could communicate intent, similar to ItemTypeVirtualFileDownload
- * and ...FileDehydrate?
- */
-enum class PinState {
-    /// Inherit the PinState of the parent directory (default)
-    Unspecified = 0,
-    /// Download file and keep it updated.
-    AlwaysLocal = 1,
-    /// File shall be virtual locally.
-    OnlineOnly = 2,
-};
-
 /**
  * @brief The SyncJournalFileRecord class
  * @ingroup libsync
@@ -87,7 +69,6 @@ public:
     RemotePermissions _remotePerm;
     bool _serverHasIgnoredFiles;
     QByteArray _checksumHeader;
-    PinState _pinState = PinState::Unspecified;
 };
 
 bool OCSYNC_EXPORT

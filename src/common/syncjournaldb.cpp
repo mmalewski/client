@@ -46,7 +46,7 @@ Q_LOGGING_CATEGORY(lcDb, "sync.database", QtInfoMsg)
 
 #define GET_FILE_RECORD_QUERY \
         "SELECT path, inode, modtime, type, md5, fileid, remotePerm, filesize," \
-        "  ignoredChildrenRemote, contentchecksumtype.name || ':' || contentChecksum, vfsPinState" \
+        "  ignoredChildrenRemote, contentchecksumtype.name || ':' || contentChecksum" \
         " FROM metadata" \
         "  LEFT JOIN checksumtype as contentchecksumtype ON metadata.contentChecksumTypeId == contentchecksumtype.id"
 
@@ -62,7 +62,6 @@ static void fillFileRecordFromGetQuery(SyncJournalFileRecord &rec, SqlQuery &que
     rec._fileSize = query.int64Value(7);
     rec._serverHasIgnoredFiles = (query.intValue(8) > 0);
     rec._checksumHeader = query.baValue(9);
-    rec._pinState = static_cast<PinState>(query.intValue(10));
 }
 
 static QByteArray defaultJournalMode(const QString &dbPath)
@@ -482,6 +481,15 @@ bool SyncJournalDb::checkConnect()
         return sqlFail("Create table datafingerprint", createQuery);
     }
 
+    // create the flags table.
+    createQuery.prepare("CREATE TABLE IF NOT EXISTS flags ("
+                        "path TEXT PRIMARY KEY,"
+                        "pinState INTEGER"
+                        ");");
+    if (!createQuery.exec()) {
+        return sqlFail("Create table flags", createQuery);
+    }
+
     // create the conflicts table.
     createQuery.prepare("CREATE TABLE IF NOT EXISTS conflicts("
                         "path TEXT PRIMARY KEY,"
@@ -867,12 +875,10 @@ bool SyncJournalDb::setFileRecord(const SyncJournalFileRecord &_record)
         }
     }
 
-    int numericPinState = static_cast<int>(record._pinState);
     qCInfo(lcDb) << "Updating file record for path:" << record._path << "inode:" << record._inode
                  << "modtime:" << record._modtime << "type:" << record._type
                  << "etag:" << record._etag << "fileId:" << record._fileId << "remotePerm:" << record._remotePerm.toString()
-                 << "fileSize:" << record._fileSize << "checksum:" << record._checksumHeader
-                 << "pinstate:" << numericPinState;
+                 << "fileSize:" << record._fileSize << "checksum:" << record._checksumHeader;
 
     qlonglong phash = getPHash(record._path);
     if (checkConnect()) {
@@ -891,8 +897,8 @@ bool SyncJournalDb::setFileRecord(const SyncJournalFileRecord &_record)
 
         if (!_setFileRecordQuery.initOrReset(QByteArrayLiteral(
             "INSERT OR REPLACE INTO metadata "
-            "(phash, pathlen, path, inode, uid, gid, mode, modtime, type, md5, fileid, remotePerm, filesize, ignoredChildrenRemote, contentChecksum, contentChecksumTypeId, vfsPinState) "
-            "VALUES (?1 , ?2, ?3 , ?4 , ?5 , ?6 , ?7,  ?8 , ?9 , ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17);"), _db)) {
+            "(phash, pathlen, path, inode, uid, gid, mode, modtime, type, md5, fileid, remotePerm, filesize, ignoredChildrenRemote, contentChecksum, contentChecksumTypeId) "
+            "VALUES (?1 , ?2, ?3 , ?4 , ?5 , ?6 , ?7,  ?8 , ?9 , ?10, ?11, ?12, ?13, ?14, ?15, ?16);"), _db)) {
             return false;
         }
 
@@ -912,7 +918,6 @@ bool SyncJournalDb::setFileRecord(const SyncJournalFileRecord &_record)
         _setFileRecordQuery.bindValue(14, record._serverHasIgnoredFiles ? 1 : 0);
         _setFileRecordQuery.bindValue(15, checksum);
         _setFileRecordQuery.bindValue(16, contentChecksumTypeId);
-        _setFileRecordQuery.bindValue(17, numericPinState);
 
         if (!_setFileRecordQuery.exec()) {
             return false;
@@ -2028,9 +2033,9 @@ PinState SyncJournalDb::pinStateForPath(const QByteArray &path)
 
     auto &query = _getPinStateQuery;
     ASSERT(query.initOrReset(QByteArrayLiteral(
-            "SELECT vfsPinState FROM metadata WHERE"
+            "SELECT pinState FROM flags WHERE"
             " " IS_PREFIX_PATH_OR_EQUAL("path", "?1")
-            " AND vfsPinState is not null AND vfsPinState != 0"
+            " AND pinState is not null AND pinState != 0"
             " ORDER BY length(path) DESC;"),
         _db));
     query.bindValue(1, path);
@@ -2040,6 +2045,26 @@ PinState SyncJournalDb::pinStateForPath(const QByteArray &path)
         return PinState::Unspecified;
 
     return static_cast<PinState>(query.intValue(0));
+}
+
+void SyncJournalDb::setPinStateForPath(const QByteArray &path, PinState state)
+{
+    QMutexLocker lock(&_mutex);
+    if (!checkConnect())
+        return;
+
+    auto &query = _setPinStateQuery;
+    ASSERT(query.initOrReset(QByteArrayLiteral(
+            // If we had sqlite >=3.24.0 everywhere this could be an upsert,
+            // making further flags columns easy
+            //"INSERT INTO flags(path, pinState) VALUES(?1, ?2)"
+            //" ON CONFLICT(path) DO UPDATE SET pinState=?2;"),
+            // Simple version that doesn't work nicely with multiple columns:
+            "INSERT OR REPLACE INTO flags(path, pinState) VALUES(?1, ?2);"),
+        _db));
+    query.bindValue(1, path);
+    query.bindValue(2, static_cast<int>(state));
+    query.exec();
 }
 
 void SyncJournalDb::commit(const QString &context, bool startTrans)

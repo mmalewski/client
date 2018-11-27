@@ -330,10 +330,7 @@ private slots:
     void testPinState()
     {
         auto make = [&](const QByteArray &path, PinState state) {
-            SyncJournalFileRecord record;
-            record._path = path;
-            record._pinState = state;
-            _db.setFileRecord(record);
+            _db.setPinStateForPath(path, state);
         };
         auto get = [&](const QByteArray &path) {
             return _db.pinStateForPath(path);

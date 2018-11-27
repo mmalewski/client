@@ -32,6 +32,24 @@
 namespace OCC {
 class SyncJournalFileRecord;
 
+/** Determines whether files should be available locally or not
+ *
+ * For new remote files the file's PinState is calculated by looking for
+ * the closest parent folder that isn't Unspecified.
+ *
+ * TODO: It seems to make sense to also store per-file PinStates.
+ * Maybe these could communicate intent, similar to ItemTypeVirtualFileDownload
+ * and ...FileDehydrate?
+ */
+enum class PinState {
+    /// Inherit the PinState of the parent directory (default)
+    Unspecified = 0,
+    /// Download file and keep it updated.
+    AlwaysLocal = 1,
+    /// File shall be virtual locally.
+    OnlineOnly = 2,
+};
+
 /**
  * @brief Class that handles the sync database
  *
@@ -259,6 +277,11 @@ public:
      */
     PinState pinStateForPath(const QByteArray &path);
 
+    /**
+     * Sets a path's pin state.
+     */
+    void setPinStateForPath(const QByteArray &path, PinState state);
+
 private:
     int getFileRecordCount();
     bool updateDatabaseStructure();
@@ -314,6 +337,7 @@ private:
     SqlQuery _setConflictRecordQuery;
     SqlQuery _deleteConflictRecordQuery;
     SqlQuery _getPinStateQuery;
+    SqlQuery _setPinStateQuery;
 
     /* Storing etags to these folders, or their parent folders, is filtered out.
      *
