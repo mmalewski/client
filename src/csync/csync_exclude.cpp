@@ -41,7 +41,7 @@
 
 /** Expands C-like escape sequences (in place)
  */
-static void csync_exclude_expand_escapes(QByteArray &input)
+void csync_exclude_expand_escapes(QByteArray &input)
 {
     size_t o = 0;
     char *line = input.data();
@@ -440,7 +440,7 @@ CSYNC_EXCLUDE_TYPE ExcludedFiles::fullPatternMatch(const QString &p, ItemType fi
  * didn't have that behavior. wildcardsMatchSlash can be used to control which behavior
  * the resulting regex shall use.
  */
-static QString convertToRegexpSyntax(QString exclude, bool wildcardsMatchSlash)
+QString ExcludedFiles::convertToRegexpSyntax(QString exclude, bool wildcardsMatchSlash)
 {
     // Translate *, ?, [...] to their regex variants.
     // The escape sequences \*, \?, \[. \\ have a special meaning,
@@ -530,7 +530,7 @@ static QString convertToRegexpSyntax(QString exclude, bool wildcardsMatchSlash)
     return regex;
 }
 
-static QString extractBnameTrigger(const QString &exclude, bool wildcardsMatchSlash)
+QString ExcludedFiles::extractBnameTrigger(const QString &exclude, bool wildcardsMatchSlash)
 {
     // We can definitely drop everything to the left of a / - that will never match
     // any bname.
